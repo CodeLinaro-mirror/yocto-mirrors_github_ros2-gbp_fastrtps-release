@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -2161,27 +2162,43 @@ TEST(DataWriterTests, LoanNegativeTests)
     ASSERT_TRUE(DomainParticipantFactory::get_instance()->delete_participant(participant) == RETCODE_OK);
 }
 
-class DataWriterTest : public DataWriter
-{
-public:
+namespace {
 
-    DataWriterImpl* get_impl() const
+// Accessor to DataWriterImpl from DataWriter
+using DataWriterImplPtr = DataWriterImpl * DataWriter::*;
+
+DataWriterImplPtr get_datawriter_impl_ptr();
+
+template<DataWriterImplPtr P>
+struct DataWriterImplAccessor
+{
+    friend DataWriterImplPtr get_datawriter_impl_ptr()
     {
-        return impl_;
+        return P;
     }
 
 };
 
-class DataWriterImplTest : public DataWriterImpl
-{
-public:
+template struct DataWriterImplAccessor<&DataWriter::impl_>;
 
-    DataWriterHistory* get_history()
+// Accessor to DataWriterHistory unique ptr from DataWriterImpl
+using DataWriterHistoryPtr = std::unique_ptr<DataWriterHistory> DataWriterImpl::*;
+
+DataWriterHistoryPtr get_datawriter_history_ptr();
+
+template<DataWriterHistoryPtr P>
+struct DataWriterHistoryAccessor
+{
+    friend DataWriterHistoryPtr get_datawriter_history_ptr()
     {
-        return history_.get();
+        return P;
     }
 
 };
+
+template struct DataWriterHistoryAccessor<&DataWriterImpl::history_>;
+
+} // namespace
 
 /**
  * This test checks instance wait_for_acknowledgements API
@@ -2244,13 +2261,10 @@ TEST(DataWriterTests, InstanceWaitForAcknowledgement)
 #endif // NDEBUG
 
     // Access DataWriterHistory
-    DataWriterTest* instance_datawriter_test = static_cast<DataWriterTest*>(instance_datawriter);
-    ASSERT_NE(nullptr, instance_datawriter_test);
-    DataWriterImpl* datawriter_impl = instance_datawriter_test->get_impl();
+    DataWriterImpl* datawriter_impl = instance_datawriter->*get_datawriter_impl_ptr();
     ASSERT_NE(nullptr, datawriter_impl);
-    DataWriterImplTest* datawriter_impl_test = static_cast<DataWriterImplTest*>(datawriter_impl);
-    ASSERT_NE(nullptr, datawriter_impl_test);
-    auto history = datawriter_impl_test->get_history();
+    DataWriterHistory* history = (datawriter_impl->*get_datawriter_history_ptr()).get();
+    ASSERT_NE(nullptr, history);
 
     // 5. Calling wait_for_acknowledgments in a keyed topic with HANDLE_NIL returns
     // RETCODE_OK
@@ -2838,6 +2852,111 @@ TEST(DataWriterTests, set_type_support_context)
     EXPECT_EQ(RETCODE_ILLEGAL_OPERATION, datawriter->set_type_support_context(nullptr));
 
     // Tear down
+    ASSERT_TRUE(publisher->delete_datawriter(datawriter) == RETCODE_OK);
+    ASSERT_TRUE(participant->delete_topic(topic) == RETCODE_OK);
+    ASSERT_TRUE(participant->delete_publisher(publisher) == RETCODE_OK);
+    ASSERT_TRUE(DomainParticipantFactory::get_instance()->delete_participant(participant) == RETCODE_OK);
+}
+
+/*!
+ * This test checks that concurrent set_qos() and get_qos() calls on an enabled DataWriter are race-free.
+ */
+TEST(DataWriterTests, ConcurrentSetQosVsGetQos)
+{
+    DomainParticipant* participant =
+            DomainParticipantFactory::get_instance()->create_participant(0, PARTICIPANT_QOS_DEFAULT);
+    ASSERT_NE(participant, nullptr);
+
+    Publisher* publisher = participant->create_publisher(PUBLISHER_QOS_DEFAULT);
+    ASSERT_NE(publisher, nullptr);
+
+    TypeSupport type(new TopicDataTypeMock());
+    type.register_type(participant);
+
+    Topic* topic = participant->create_topic("footopic_concurrent", type.get_type_name(), TOPIC_QOS_DEFAULT);
+    ASSERT_NE(topic, nullptr);
+
+    DataWriter* datawriter = publisher->create_datawriter(topic, DATAWRITER_QOS_DEFAULT);
+    ASSERT_NE(datawriter, nullptr);
+    ASSERT_TRUE(datawriter->is_enabled());
+
+    // Two valid, mutable QoS configurations that differ in deadline period.
+    DataWriterQos qos_a = DATAWRITER_QOS_DEFAULT;
+    qos_a.deadline().period = eprosima::fastdds::dds::Duration_t(1, 0);
+
+    DataWriterQos qos_b = DATAWRITER_QOS_DEFAULT;
+    qos_b.deadline().period = eprosima::fastdds::dds::Duration_t(2, 0);
+
+    constexpr int kIterations = 5000;
+
+    std::mutex barrier_mutex;
+    std::condition_variable barrier_cv;
+    bool go = false;
+
+    std::atomic<bool> writer_error{false};
+    std::atomic<bool> reader_error{false};
+
+    std::thread writer_thread([&]()
+            {
+                {
+                    std::unique_lock<std::mutex> lk(barrier_mutex);
+                    barrier_cv.wait(lk, [&]
+                    {
+                        return go;
+                    });
+                }
+                for (int i = 0; i < kIterations; ++i)
+                {
+                    const DataWriterQos& qos_to_set = (i % 2 == 0) ? qos_a : qos_b;
+                    if (datawriter->set_qos(qos_to_set) != RETCODE_OK)
+                    {
+                        writer_error.store(true);
+                        break;
+                    }
+                }
+            });
+
+    std::thread reader_thread([&]()
+            {
+                {
+                    std::unique_lock<std::mutex> lk(barrier_mutex);
+                    barrier_cv.wait(lk, [&]
+                    {
+                        return go;
+                    });
+                }
+                DataWriterQos observed;
+                for (int i = 0; i < kIterations; ++i)
+                {
+                    if (datawriter->get_qos(observed) != RETCODE_OK)
+                    {
+                        reader_error.store(true);
+                        break;
+                    }
+                    const eprosima::fastdds::dds::Duration_t& p = observed.deadline().period;
+                    const bool valid = (p == qos_a.deadline().period) ||
+                    (p == qos_b.deadline().period) ||
+                    (p == DATAWRITER_QOS_DEFAULT.deadline().period);
+                    if (!valid)
+                    {
+                        reader_error.store(true);
+                        break;
+                    }
+                }
+            });
+
+    {
+        std::lock_guard<std::mutex> lk(barrier_mutex);
+        go = true;
+    }
+    barrier_cv.notify_all();
+
+    writer_thread.join();
+    reader_thread.join();
+
+    EXPECT_FALSE(writer_error.load()) << "set_qos() returned an unexpected error code during concurrent run";
+    EXPECT_FALSE(reader_error.load()) << "get_qos() returned a torn or unexpected QoS value during concurrent run";
+
     ASSERT_TRUE(publisher->delete_datawriter(datawriter) == RETCODE_OK);
     ASSERT_TRUE(participant->delete_topic(topic) == RETCODE_OK);
     ASSERT_TRUE(participant->delete_publisher(publisher) == RETCODE_OK);
