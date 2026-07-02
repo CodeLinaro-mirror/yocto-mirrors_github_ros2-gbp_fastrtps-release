@@ -9,7 +9,7 @@ Co-authored-by: Shane Loretz <shane.loretz@gmail.com>
  1 file changed, 3 insertions(+)
 
 diff --git a/rpm/ros-lyrical-fastdds.spec b/rpm/ros-lyrical-fastdds.spec
-index 825445335e69..3387a0630695 100644
+index 82544533..3387a063 100644
 --- a/rpm/ros-lyrical-fastdds.spec
 +++ b/rpm/ros-lyrical-fastdds.spec
 @@ -81,6 +81,9 @@ giving the user full access to the protocol internals.
@@ -23,5 +23,5 @@ index 825445335e69..3387a0630695 100644
  %cmake3_build
  
 -- 
-2.53.0
+2.34.1
 
