@@ -88,23 +88,25 @@ static CacheChange_t* create_change_for_message(
 
 SecurityManager::SecurityManager(
         RTPSParticipantImpl* participant,
+        const RTPSParticipantAttributes& pattr,
         ISecurityPluginFactory& plugin_factory)
     : participant_stateless_message_listener_(*this)
     , participant_volatile_message_secure_listener_(*this)
     , participant_(participant)
     , factory_(plugin_factory)
     , domain_id_(0)
+    , max_discovered_participants_(pattr.allocation.participants.maximum)
     , auth_last_sequence_number_(1)
     , crypto_last_sequence_number_(1)
     , temp_reader_proxies_({
-                participant->get_attributes().allocation.locators.max_unicast_locators,
-                participant->get_attributes().allocation.locators.max_multicast_locators,
-                participant->get_attributes().allocation.data_limits,
-                participant->get_attributes().allocation.content_filter})
+                pattr.allocation.locators.max_unicast_locators,
+                pattr.allocation.locators.max_multicast_locators,
+                pattr.allocation.data_limits,
+                pattr.allocation.content_filter})
     , temp_writer_proxies_({
-                participant->get_attributes().allocation.locators.max_unicast_locators,
-                participant->get_attributes().allocation.locators.max_multicast_locators,
-                participant->get_attributes().allocation.data_limits})
+                pattr.allocation.locators.max_unicast_locators,
+                pattr.allocation.locators.max_multicast_locators,
+                pattr.allocation.data_limits})
 {
     assert(participant != nullptr);
 }
@@ -122,9 +124,8 @@ bool SecurityManager::init(
     try
     {
         domain_id_ = participant_->get_domain_id();
-        auto part_attributes = participant_->get_attributes();
         const PropertyPolicy log_properties = PropertyPolicyHelper::get_properties_with_prefix(
-            part_attributes.properties,
+            participant_->get_const_attributes().properties,
             "dds.sec.log.builtin.DDS_LogTopic.");
 
         // length(log_properties) == 0 considered as logging disable.
@@ -213,7 +214,7 @@ bool SecurityManager::init(
         {
             // retrieve authentication properties, if any
             const PropertyPolicy auth_handshake_properties = PropertyPolicyHelper::get_properties_with_prefix(
-                part_attributes.properties,
+                participant_->get_const_attributes().properties,
                 "dds.sec.auth.builtin.PKI-DH.");
 
             // if auth_handshake_properties is empty, the default values are used
@@ -233,7 +234,7 @@ bool SecurityManager::init(
                 ret = authentication_plugin_->validate_local_identity(&local_identity_handle_,
                                 adjusted_participant_key,
                                 domain_id_,
-                                part_attributes,
+                                participant_->get_const_attributes().properties,
                                 participant_->getGuid(),
                                 exception);
             }
@@ -256,7 +257,7 @@ bool SecurityManager::init(
                     local_permissions_handle_ = access_plugin_->validate_local_permissions(
                         *authentication_plugin_, *local_identity_handle_,
                         domain_id_,
-                        part_attributes,
+                        participant_->get_const_attributes().properties,
                         exception);
 
                     if (local_permissions_handle_ != nullptr)
@@ -264,8 +265,7 @@ bool SecurityManager::init(
                         if (!local_permissions_handle_->nil())
                         {
                             if (access_plugin_->check_create_participant(*local_permissions_handle_,
-                                    domain_id_,
-                                    part_attributes, exception))
+                                    domain_id_, exception))
                             {
                                 // Set credentials.
                                 PermissionsCredentialToken* token = nullptr;
@@ -328,10 +328,15 @@ bool SecurityManager::init(
                     {
                         crypto_plugin_->set_logger(logging_plugin_, exception);
 
+                        // When no access control plugin is configured, local_permissions_handle_ is null
+                        NilHandle nil_permissions_handle;
+                        const PermissionsHandle& permissions_handle = (local_permissions_handle_ != nullptr) ?
+                                *local_permissions_handle_ : nil_permissions_handle;
+
                         local_participant_crypto_handle_ =
                                 crypto_plugin_->cryptokeyfactory()->register_local_participant(
                             *local_identity_handle_,
-                            *local_permissions_handle_,
+                            permissions_handle,
                             participant_properties.properties(),
                             attributes,
                             exception);
@@ -619,28 +624,48 @@ bool SecurityManager::discovered_participant(
     AuthenticationStatus auth_status = AUTHENTICATION_INIT;
 
     // Create or find information
-    bool undiscovered = false;
+    bool newly_discovered = false;
     DiscoveredParticipantInfo::AuthUniquePtr remote_participant_info;
     // Use the information from the collection
     const ParticipantProxyData* remote_participant_data = nullptr;
     {
         std::lock_guard<shared_mutex> _(mutex_);
 
-        auto map_ret = discovered_participants_.insert(
-            std::make_pair(
+        auto dp_it = discovered_participants_.lower_bound(participant_data.guid);
+        if ((dp_it != discovered_participants_.end()) && (dp_it->first == participant_data.guid))
+        {
+            // Already exists, use the information from the collection
+            remote_participant_info = dp_it->second->get_auth();
+            remote_participant_data = &dp_it->second->participant_data();
+        }
+        else if (discovered_participants_.size() < max_discovered_participants_)
+        {
+            // Create new element, because it is not discovered yet
+            auto map_ret = discovered_participants_.emplace_hint(
+                dp_it,
                 participant_data.guid,
                 std::unique_ptr<DiscoveredParticipantInfo>(
-                    new DiscoveredParticipantInfo(
-                        auth_status,
-                        participant_data))));
+                    new DiscoveredParticipantInfo(auth_status, participant_data)));
 
-        undiscovered = map_ret.second;
-        remote_participant_info = map_ret.first->second->get_auth();
-        remote_participant_data = &map_ret.first->second->participant_data();
+            // New element, so mark as newly_discovered
+            newly_discovered = true;
+            // Use the recently created information from the collection
+            remote_participant_info = map_ret->second->get_auth();
+            remote_participant_data = &map_ret->second->participant_data();
+        }
+        else
+        {
+            // Using info level to avoid clogging the logs, since this could be triggered by an attacker flooding the
+            // network with fake participants.
+            EPROSIMA_LOG_INFO(SECURITY,
+                    "Maximum number of discovered participants reached. Ignoring participant "
+                    << participant_data.guid);
+            return false;
+        }
     }
 
     bool notify_part_authorized = false;
-    if (undiscovered && remote_participant_info && remote_participant_data != nullptr)
+    if (newly_discovered && remote_participant_info && remote_participant_data != nullptr)
     {
         // Configure the timed event but do not start it
         const GUID_t guid = remote_participant_data->guid;
@@ -1123,7 +1148,7 @@ bool SecurityManager::create_participant_stateless_message_writer()
         participant_stateless_message_writer_hattr_,
         participant_stateless_message_pool_);
 
-    const RTPSParticipantAttributes& pattr = participant_->get_attributes();
+    RTPSParticipantAttributes pattr = participant_->copy_attributes();
 
     WriterAttributes watt;
     watt.endpoint.external_unicast_locators = pattr.builtin.metatraffic_external_unicast_locators;
@@ -1172,7 +1197,7 @@ bool SecurityManager::create_participant_stateless_message_reader()
 {
     participant_stateless_message_reader_history_ = new ReaderHistory(participant_stateless_message_reader_hattr_);
 
-    const RTPSParticipantAttributes& pattr = participant_->get_attributes();
+    RTPSParticipantAttributes pattr = participant_->copy_attributes();
 
     ReaderAttributes ratt;
     ratt.endpoint.topicKind = NO_KEY;
@@ -1271,7 +1296,7 @@ bool SecurityManager::create_participant_volatile_message_secure_writer()
     participant_volatile_message_secure_writer_history_ =
             new WriterHistory(participant_volatile_message_secure_hattr_, participant_volatile_message_secure_pool_);
 
-    const RTPSParticipantAttributes& pattr = participant_->get_attributes();
+    RTPSParticipantAttributes pattr = participant_->copy_attributes();
 
     WriterAttributes watt;
     watt.endpoint.endpointKind = WRITER;
@@ -1324,7 +1349,7 @@ bool SecurityManager::create_participant_volatile_message_secure_reader()
     participant_volatile_message_secure_reader_history_ =
             new ReaderHistory(participant_volatile_message_secure_hattr_);
 
-    const RTPSParticipantAttributes& pattr = participant_->get_attributes();
+    RTPSParticipantAttributes pattr = participant_->copy_attributes();
 
     ReaderAttributes ratt;
     ratt.endpoint.topicKind = NO_KEY;
@@ -2971,7 +2996,7 @@ bool SecurityManager::discovered_reader(
 
         if (local_writer != writer_handles_.end())
         {
-            if (remote_participant_crypto_handle != nullptr)
+            if (remote_participant_crypto_handle != nullptr && shared_secret_handle != nullptr)
             {
                 DatareaderCryptoHandle* remote_reader_handle =
                         crypto_plugin_->cryptokeyfactory()->register_matched_remote_datareader(
@@ -3331,7 +3356,7 @@ bool SecurityManager::discovered_writer(
 
         if (local_reader != reader_handles_.end())
         {
-            if (remote_participant_crypto_handle != nullptr)
+            if (remote_participant_crypto_handle != nullptr && shared_secret_handle != nullptr)
             {
                 DatawriterCryptoHandle* remote_writer_handle =
                         crypto_plugin_->cryptokeyfactory()->register_matched_remote_datawriter(
