@@ -161,8 +161,8 @@ DomainParticipant* DomainParticipantFactory::create_participant(
 #ifndef FASTDDS_STATISTICS
     DomainParticipantImpl* dom_part_impl = new DomainParticipantImpl(dom_part, did, pqos, listener);
 #else
-    statistics::dds::DomainParticipantImpl* dom_part_impl =
-            new statistics::dds::DomainParticipantImpl(dom_part, did, pqos, listener);
+    statistics::dds::DomainParticipantImpl* dom_part_impl = new statistics::dds::DomainParticipantImpl(dom_part, did,
+                    pqos, listener);
 #endif // FASTDDS_STATISTICS
 
     if (fastdds::rtps::GUID_t::unknown() != dom_part_impl->guid())

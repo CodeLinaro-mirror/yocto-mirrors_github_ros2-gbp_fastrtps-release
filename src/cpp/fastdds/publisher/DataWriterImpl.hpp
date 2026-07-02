@@ -320,6 +320,9 @@ public:
 
     const DataWriterQos& get_qos() const;
 
+    ReturnCode_t get_qos(
+            DataWriterQos& qos) const;
+
     Topic* get_topic() const;
 
     const DataWriterListener* get_listener() const;
@@ -480,6 +483,9 @@ protected:
 
     DataWriterQos qos_;
 
+    //! Mutex to protect qos_
+    mutable std::mutex qos_mutex_;
+
     //! DataWriterListener
     DataWriterListener* listener_ = nullptr;
 
@@ -531,7 +537,10 @@ protected:
                 const uint32_t& status_id);
 #endif //FASTDDS_STATISTICS
 
+    private:
+
         DataWriterImpl* data_writer_;
+        std::mutex matching_info_mutex_;
     }
     writer_listener_;
 

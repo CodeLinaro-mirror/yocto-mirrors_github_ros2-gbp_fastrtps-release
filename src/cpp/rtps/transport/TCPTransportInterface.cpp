@@ -816,10 +816,10 @@ bool TCPTransportInterface::OpenOutputChannel(
         }
     }
 
+    std::shared_ptr<TCPChannelResource> channel;
     // (Server-Client Topology OR LARGE DATA with PDP discovery after TCP connection) - Server side
     if (channel_resource != channel_resources_.end())
     {
-        std::shared_ptr<TCPChannelResource> channel;
         // There is an existing channel in channel_resources_ created for reception with the remote locator as key. Use it.
         channel = channel_resource->second;
         // Add logical port to channel if it's not there yet
@@ -867,7 +867,7 @@ bool TCPTransportInterface::OpenOutputChannel(
             EPROSIMA_LOG_INFO(RTCP, "OpenOutputChannel: [CONNECT] @ " << IPLocator::to_string(locator));
 
             // Create a TCP_CONNECT_TYPE channel
-            std::shared_ptr<TCPChannelResource> channel(
+            channel.reset(
 #if TLS_FOUND
                 (configuration()->apply_security) ?
                 static_cast<TCPChannelResource*>(
@@ -896,7 +896,7 @@ bool TCPTransportInterface::OpenOutputChannel(
 
     statistics_info_.add_entry(locator);
     send_resource_list.emplace_back(
-        static_cast<SenderResource*>(new TCPSenderResource(*this, physical_locator)));
+        static_cast<SenderResource*>(new TCPSenderResource(*this, physical_locator, channel)));
 
     return true;
 }
@@ -1008,7 +1008,7 @@ bool TCPTransportInterface::CreateInitialConnect(
     channel->add_logical_port(logical_port, rtcp_message_manager_.get());
     statistics_info_.add_entry(locator);
     send_resource_list.emplace_back(
-        static_cast<SenderResource*>(new TCPSenderResource(*this, physical_locator)));
+        static_cast<SenderResource*>(new TCPSenderResource(*this, physical_locator, channel)));
 
     std::vector<fastdds::rtps::IPFinder::info_IP> local_interfaces;
     // Check if the locator is from an owned interface to link all local interfaces to the channel
@@ -1144,6 +1144,55 @@ void TCPTransportInterface::perform_listen_operation(
     }
 
     EPROSIMA_LOG_INFO(RTCP, "End PerformListenOperation " << channel->locator());
+
+    // If we get here, the channel has been disconnected. We might need to clean it up if
+    // the remote endpoint is the one that initiated the disconnection.
+    // We only delete acceptor channels, as connect channels need to be kept in channel_resources_ to restart the connection
+    if (channel && channel->tcp_connection_type() == TCPChannelResource::TCPConnectionType::TCP_ACCEPT_TYPE)
+    {
+        // Defer the erase to io_context_ so the TCPChannelResource destructor runs off the listener thread that is about to exit.
+        // Weak_ptr is used to avoid keeping the channel alive if it has already been removed from the maps by another thread.
+        asio::post(io_context_, [this, channel_weak]()
+                {
+                    auto ch = channel_weak.lock();
+                    if (!ch)
+                    {
+                        return;
+                    }
+                    {
+                        // Channel resources map case
+                        std::unique_lock<std::mutex> scoped_lock(sockets_map_mutex_);
+                        bool erased = false;
+                        // There might be multiple entries with the same channel. Delete them all
+                        for (auto it = channel_resources_.begin(); it != channel_resources_.end(); )
+                        {
+                            if (it->second == ch)
+                            {
+                                it = channel_resources_.erase(it);
+                                erased = true;
+                            }
+                            else
+                            {
+                                ++it;
+                            }
+                        }
+                        if (erased)
+                        {
+                            return;
+                        }
+                    }
+                    // Unbound channel resources map case
+                    std::unique_lock<std::mutex> unbound_lock(unbound_map_mutex_);
+                    auto it = std::find(unbound_channel_resources_.begin(),
+                    unbound_channel_resources_.end(), ch);
+                    if (it != unbound_channel_resources_.end())
+                    {
+                        unbound_channel_resources_.erase(it);
+                    }
+                });
+        // Drop the listener's reference so the destructor cannot run on this thread
+        channel.reset();
+    }
 }
 
 bool TCPTransportInterface::read_body(
@@ -1690,7 +1739,7 @@ bool TCPTransportInterface::getDefaultMetatrafficMulticastLocators(
         uint32_t ) const
 {
     // TCP doesn't have multicast support
-    return true;
+    return false;
 }
 
 bool TCPTransportInterface::getDefaultMetatrafficUnicastLocators(
@@ -1722,7 +1771,7 @@ bool TCPTransportInterface::fillMetatrafficMulticastLocator(
         uint32_t) const
 {
     // TCP doesn't have multicast support
-    return true;
+    return false;
 }
 
 bool TCPTransportInterface::fillMetatrafficUnicastLocator(
@@ -2040,8 +2089,24 @@ void TCPTransportInterface::cleanup_sender_resources(
             {
                 if (tcp_sender_resource->locator() == remote_participant_physical_locator)
                 {
-                    it = send_resource_list.erase(it);
-                    continue;
+                    // Keep the send resource only if a *different* connected channel currently owns this physical
+                    // locator (reconnection of a client with a listening port; see fill_local_physical_port).
+                    // The original (tearing-down) channel must still be cleaned up even if it is momentarily in
+                    // eEstablished because its UNBIND has not yet been processed by the listener thread.
+                    auto channel_resource_it = channel_resources_.find(tcp_sender_resource->locator());
+                    bool should_erase = true;
+                    if (channel_resource_it != channel_resources_.end() && channel_resource_it->second->connected())
+                    {
+                        const auto& stored = tcp_sender_resource->channel();
+                        const auto& current = channel_resource_it->second;
+                        const bool same_channel = !stored.owner_before(current) && !current.owner_before(stored);
+                        should_erase = same_channel;
+                    }
+                    if (should_erase)
+                    {
+                        it = send_resource_list.erase(it);
+                        continue;
+                    }
                 }
             }
             ++it;
