@@ -29,7 +29,7 @@ endif()
 ###############################################################################
 # Project                                                                     #
 ###############################################################################
-project(fastdds VERSION "3.6.1.0" LANGUAGES C CXX)
+project(fastdds VERSION "3.6.2.0" LANGUAGES C CXX)
 
 set(PROJECT_NAME_LARGE "Fast DDS")
 string(TOUPPER "${PROJECT_NAME}" PROJECT_NAME_UPPER)
@@ -164,6 +164,23 @@ if (SANITIZER)
 
         else()
             message(FATAL_ERROR "Thread sanitizer requires Clang or GCC. Aborting.")
+        endif()
+
+    elseif(${SANITIZER} STREQUAL "UNDEFINED")
+        message(STATUS "Enabling undefined behavior sanitizer...")
+        # Warning/Error messages
+        if(NOT (CMAKE_BUILD_TYPE STREQUAL "Debug"))
+            message(WARNING "Undefined behavior sanitizer results with an optimized (non-Debug) build may be misleading")
+        endif()
+
+        if(CMAKE_COMPILER_IS_GNUCXX)
+            message(STATUS "Building with Undefined behavior sanitizer Tools")
+
+            set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=undefined -fno-omit-frame-pointer -fsanitize=float-cast-overflow -fsanitize=float-divide-by-zero -fsanitize=bounds-strict")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined -fno-omit-frame-pointer -fsanitize=float-cast-overflow -fsanitize=float-divide-by-zero -fsanitize=bounds-strict")
+
+        else()
+            message(FATAL_ERROR "Undefined behavior sanitizer requires GCC. Aborting.")
         endif()
 
     else()
