@@ -1,3 +1,29 @@
+## fastdds (lyrical) - 3.6.2-1
+
+The packages in the `fastdds` repository were released into the `lyrical` distro by running `/usr/bin/bloom-release -r lyrical fastdds` on `Thu, 02 Jul 2026 13:19:23 -0000`
+
+The `fastdds` package was released.
+
+These packages were explicitly ignored:
+- `fastrtps`
+
+Version of package(s) in repository `fastdds`:
+
+- upstream repository: https://github.com/eProsima/Fast-DDS.git
+- release repository: https://github.com/ros2-gbp/fastdds-release.git
+- rosdistro version: `3.6.1-3`
+- old version: `3.6.1-3`
+- new version: `3.6.2-1`
+
+Versions of tools used:
+
+- bloom version: `0.14.3`
+- catkin_pkg version: `1.1.0`
+- rosdep version: `0.26.0`
+- rosdistro version: `1.0.1`
+- vcstools version: `0.1.42`
+
+
 ## fastdds (rolling) - 3.6.2-1
 
 The packages in the `fastdds` repository were released into the `rolling` distro by running `/usr/bin/bloom-release -r rolling fastdds` on `Thu, 02 Jul 2026 13:15:16 -0000`
