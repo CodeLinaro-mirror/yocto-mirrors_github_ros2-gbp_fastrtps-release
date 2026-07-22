@@ -192,10 +192,8 @@ ParticipantProxyData* PDP::add_participant_proxy_data(
         }
         else
         {
-            EPROSIMA_LOG_WARNING(RTPS_PDP, "Maximum number of participant proxies (" << max_proxies \
-                                                                                     << ") reached for participant "
-                                                                                     << mp_RTPSParticipant->getGuid()
-                                                                                     << std::endl);
+            EPROSIMA_LOG_WARNING(RTPS_PDP, "Maximum number of participant proxies (" << max_proxies << \
+                    ") reached for participant " << mp_RTPSParticipant->getGuid() << std::endl);
             return nullptr;
         }
     }
@@ -318,7 +316,6 @@ void PDP::initializeParticipantProxyData(
     participant_data->product_version.major = FASTDDS_VERSION_MAJOR;
     participant_data->product_version.minor = FASTDDS_VERSION_MINOR;
     participant_data->product_version.patch = FASTDDS_VERSION_MICRO;
-    participant_data->product_version.tweak = FASTDDS_VERSION_TWEAK;
     participant_data->machine_id = SystemInfo::instance().machine_id();
 
     // TODO: participant_data->m_available_builtin_endpoints |= mp_builtin->available_builtin_endpoints();
@@ -607,13 +604,6 @@ void PDP::announceParticipantState(
             {
                 mp_mutex->lock();
                 ParticipantProxyData* local_participant_data = getLocalParticipantProxyData();
-                if (!local_participant_data)
-                {
-                    EPROSIMA_LOG_ERROR(RTPS_PDP,
-                            "announceParticipantState(): local participant data is null");
-                    mp_mutex->unlock();
-                    return;
-                }
                 InstanceHandle_t key = local_participant_data->m_key;
                 ParticipantProxyData proxy_data_copy(*local_participant_data);
                 mp_mutex->unlock();
@@ -655,13 +645,6 @@ void PDP::announceParticipantState(
         {
             mp_mutex->lock();
             ParticipantProxyData* local_participant_data = getLocalParticipantProxyData();
-            if (!local_participant_data)
-            {
-                EPROSIMA_LOG_ERROR(RTPS_PDP,
-                        "announceParticipantState(): local participant data is null");
-                mp_mutex->unlock();
-                return;
-            }
             InstanceHandle_t key = local_participant_data->m_key;
             ParticipantProxyData proxy_data_copy(*local_participant_data);
             mp_mutex->unlock();
@@ -833,7 +816,15 @@ bool PDP::removeReaderProxyData(
             {
                 ReaderProxyData* pR = rit->second;
                 mp_EDP->unpairReaderProxy(pit->guid, reader_guid);
-                mp_RTPSParticipant->notify_reader_discovery(ReaderDiscoveryStatus::REMOVED_READER, *pR);
+
+                RTPSParticipantListener* listener = mp_RTPSParticipant->getListener();
+                if (listener)
+                {
+                    RTPSParticipant* participant = mp_RTPSParticipant->getUserRTPSParticipant();
+                    bool should_be_ignored = false;
+                    auto reason = ReaderDiscoveryStatus::REMOVED_READER;
+                    listener->on_reader_discovery(participant, reason, *pR, should_be_ignored);
+                }
 
 #ifdef FASTDDS_STATISTICS
                 auto proxy_observer = get_proxy_observer();
@@ -872,7 +863,15 @@ bool PDP::removeWriterProxyData(
             {
                 WriterProxyData* pW = wit->second;
                 mp_EDP->unpairWriterProxy(pit->guid, writer_guid, false);
-                mp_RTPSParticipant->notify_writer_discovery(WriterDiscoveryStatus::REMOVED_WRITER, *pW);
+
+                RTPSParticipantListener* listener = mp_RTPSParticipant->getListener();
+                if (listener)
+                {
+                    RTPSParticipant* participant = mp_RTPSParticipant->getUserRTPSParticipant();
+                    bool should_be_ignored = false;
+                    auto status = WriterDiscoveryStatus::REMOVED_WRITER;
+                    listener->on_writer_discovery(participant, status, *pW, should_be_ignored);
+                }
 
 #ifdef FASTDDS_STATISTICS
                 auto proxy_observer = get_proxy_observer();
@@ -960,7 +959,15 @@ ReaderProxyData* PDP::addReaderProxyData(
                     return nullptr;
                 }
 
-                mp_RTPSParticipant->notify_reader_discovery(ReaderDiscoveryStatus::CHANGED_QOS_READER, *ret_val);
+                RTPSParticipantListener* listener = mp_RTPSParticipant->getListener();
+                if (listener)
+                {
+                    RTPSParticipant* participant = mp_RTPSParticipant->getUserRTPSParticipant();
+                    bool should_be_ignored = false;
+                    auto reason = ReaderDiscoveryStatus::CHANGED_QOS_READER;
+                    listener->on_reader_discovery(participant, reason, *ret_val, should_be_ignored);
+                }
+
                 return ret_val;
             }
 
@@ -983,10 +990,8 @@ ReaderProxyData* PDP::addReaderProxyData(
                 }
                 else
                 {
-                    EPROSIMA_LOG_WARNING(RTPS_PDP, "Maximum number of reader proxies (" << max_proxies
-                                                                                        << ") reached for participant "
-                                                                                        << mp_RTPSParticipant->getGuid()
-                                                                                        << std::endl);
+                    EPROSIMA_LOG_WARNING(RTPS_PDP, "Maximum number of reader proxies (" << max_proxies <<
+                            ") reached for participant " << mp_RTPSParticipant->getGuid() << std::endl);
                     return nullptr;
                 }
             }
@@ -1008,7 +1013,15 @@ ReaderProxyData* PDP::addReaderProxyData(
                 return nullptr;
             }
 
-            mp_RTPSParticipant->notify_reader_discovery(ReaderDiscoveryStatus::DISCOVERED_READER, *ret_val);
+            RTPSParticipantListener* listener = mp_RTPSParticipant->getListener();
+            if (listener)
+            {
+                RTPSParticipant* participant = mp_RTPSParticipant->getUserRTPSParticipant();
+                bool should_be_ignored = false;
+                auto reason = ReaderDiscoveryStatus::DISCOVERED_READER;
+                listener->on_reader_discovery(participant, reason, *ret_val, should_be_ignored);
+            }
+
             return ret_val;
         }
     }
@@ -1048,7 +1061,15 @@ WriterProxyData* PDP::addWriterProxyData(
                     return nullptr;
                 }
 
-                mp_RTPSParticipant->notify_writer_discovery(WriterDiscoveryStatus::CHANGED_QOS_WRITER, *ret_val);
+                RTPSParticipantListener* listener = mp_RTPSParticipant->getListener();
+                if (listener)
+                {
+                    RTPSParticipant* participant = mp_RTPSParticipant->getUserRTPSParticipant();
+                    bool should_be_ignored = false;
+                    auto status = WriterDiscoveryStatus::CHANGED_QOS_WRITER;
+                    listener->on_writer_discovery(participant, status, *ret_val, should_be_ignored);
+                }
+
                 return ret_val;
             }
 
@@ -1070,10 +1091,8 @@ WriterProxyData* PDP::addWriterProxyData(
                 }
                 else
                 {
-                    EPROSIMA_LOG_WARNING(RTPS_PDP, "Maximum number of writer proxies (" << max_proxies
-                                                                                        << ") reached for participant "
-                                                                                        << mp_RTPSParticipant->getGuid()
-                                                                                        << std::endl);
+                    EPROSIMA_LOG_WARNING(RTPS_PDP, "Maximum number of writer proxies (" << max_proxies <<
+                            ") reached for participant " << mp_RTPSParticipant->getGuid() << std::endl);
                     return nullptr;
                 }
             }
@@ -1095,7 +1114,15 @@ WriterProxyData* PDP::addWriterProxyData(
                 return nullptr;
             }
 
-            mp_RTPSParticipant->notify_writer_discovery(WriterDiscoveryStatus::DISCOVERED_WRITER, *ret_val);
+            RTPSParticipantListener* listener = mp_RTPSParticipant->getListener();
+            if (listener)
+            {
+                RTPSParticipant* participant = mp_RTPSParticipant->getUserRTPSParticipant();
+                bool should_be_ignored = false;
+                auto status = WriterDiscoveryStatus::DISCOVERED_WRITER;
+                listener->on_writer_discovery(participant, status, *ret_val, should_be_ignored);
+            }
+
             return ret_val;
         }
     }
@@ -1126,14 +1153,6 @@ bool PDP::get_all_local_proxies(
 {
     std::lock_guard<std::recursive_mutex> guardPDP(*mp_mutex);
     ParticipantProxyData* local_participant = getLocalParticipantProxyData();
-
-    if (!local_participant)
-    {
-        EPROSIMA_LOG_ERROR(RTPS_PDP,
-                "announceParticipantState(): local participant data is null");
-        return false;
-    }
-
     guids.reserve(local_participant->m_writers->size() +
             local_participant->m_readers->size() +
             1);
@@ -1307,7 +1326,14 @@ void PDP::actions_on_remote_participant_removed(
             if (reader_guid != c_Guid_Unknown)
             {
                 mp_EDP->unpairReaderProxy(partGUID, reader_guid);
-                mp_RTPSParticipant->notify_reader_discovery(ReaderDiscoveryStatus::REMOVED_READER, *rit, listener);
+
+                if (listener)
+                {
+                    RTPSParticipant* participant = mp_RTPSParticipant->getUserRTPSParticipant();
+                    bool should_be_ignored = false;
+                    auto status = ReaderDiscoveryStatus::REMOVED_READER;
+                    listener->on_reader_discovery(participant, status, *rit, should_be_ignored);
+                }
             }
         }
         for (auto pit : *pdata->m_writers)
@@ -1319,7 +1345,13 @@ void PDP::actions_on_remote_participant_removed(
                 mp_EDP->unpairWriterProxy(partGUID, writer_guid,
                         reason == ParticipantDiscoveryStatus::DROPPED_PARTICIPANT);
 
-                mp_RTPSParticipant->notify_writer_discovery(WriterDiscoveryStatus::REMOVED_WRITER, *wit, listener);
+                if (listener)
+                {
+                    RTPSParticipant* participant = mp_RTPSParticipant->getUserRTPSParticipant();
+                    bool should_be_ignored = false;
+                    auto status = WriterDiscoveryStatus::REMOVED_WRITER;
+                    listener->on_writer_discovery(participant, status, *wit, should_be_ignored);
+                }
             }
         }
     }
@@ -1538,15 +1570,7 @@ void PDP::set_external_participant_properties_(
     // Set participant type property
     // TODO: This could be done somewhere else that makes more sense.
     std::stringstream participant_type;
-    if (part_attributes.builtin.discovery_config.discoveryProtocol == DiscoveryProtocol::CLIENT)
-    {
-        // Announce CLIENT as SUPER_CLIENT for backwards compatibility
-        participant_type << DiscoveryProtocol::SUPER_CLIENT;
-    }
-    else
-    {
-        participant_type << part_attributes.builtin.discovery_config.discoveryProtocol;
-    }
+    participant_type << part_attributes.builtin.discovery_config.discoveryProtocol;
     auto ptype = participant_type.str();
     participant_data->properties.push_back(fastdds::dds::parameter_property_participant_type, ptype);
 
@@ -1719,14 +1743,6 @@ void PDP::local_participant_attributes_update_nts(
 {
     // Update user data
     auto participant_data = getLocalParticipantProxyData();
-
-    if (nullptr == participant_data)
-    {
-        EPROSIMA_LOG_ERROR(RTPS_PDP,
-                "local_participant_attributes_update_nts(): local participant data is null");
-        return;
-    }
-
     participant_data->user_data.data_vec(new_atts.userData);
 
     // If we are intraprocess only, we do not need to update locators

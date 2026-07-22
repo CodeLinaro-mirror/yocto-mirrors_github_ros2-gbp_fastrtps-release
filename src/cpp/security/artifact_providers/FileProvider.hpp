@@ -30,7 +30,6 @@
 #include <openssl/types.h>
 #endif // if OPENSSL_VERSION_NUMBER < 0x30000000L
 
-
 #include <rtps/security/exceptions/SecurityException.h>
 
 namespace eprosima {

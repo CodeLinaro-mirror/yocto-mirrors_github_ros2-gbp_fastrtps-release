@@ -77,27 +77,33 @@ target_include_directories(EdpTests PRIVATE
     ${Asio_INCLUDE_DIR}
     )
 target_link_libraries(EdpTests
-    fastcdr
     fastdds::log
     fastdds::xtypes::type-representation
     fastdds::xtypes::dynamic-types::impl
     foonathan_memory
     GTest::gmock
-    $<$<BOOL:${WIN32}>:iphlpapi$<SEMICOLON>Shlwapi>
-    $<$<BOOL:${WIN32}>:ws2_32>
-    $<$<BOOL:${QNX}>:socket>
     ${CMAKE_DL_LIBS})
+if(QNX)
+    target_link_libraries(EdpTests socket)
+endif()
+if(MSVC OR MSVC_IDE)
+    target_link_libraries(EdpTests ${PRIVACY} fastcdr iphlpapi Shlwapi ws2_32)
+elseif(APPLE)
+    target_link_libraries(EdpTests ${PRIVACY} fastcdr "-framework CoreFoundation" "-framework IOKit")
+else()
+    target_link_libraries(EdpTests ${PRIVACY} fastcdr)
+endif()
 
 gtest_discover_tests(EdpTests)
 
 #PDP TESTS
 
 set(TCPTransportInterface_SOURCE
+    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/TransportInterface.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/ChannelResource.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/PortBasedTransportDescriptor.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/messages/CDRMessage.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/messages/RTPSMessageCreator.cpp
-    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/ChannelResource.cpp
-    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/MulticastTransportInterface.cpp
-    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/PortBasedTransportDescriptor.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/tcp/RTCPMessageManager.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/tcp/TCPControlMessage.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/TCPAcceptor.cpp
@@ -107,7 +113,6 @@ set(TCPTransportInterface_SOURCE
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/TCPTransportInterface.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/TCPv4Transport.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/TCPv6Transport.cpp
-    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/TransportInterface.cpp
     )
 if(TLS_FOUND)
     set(TCPTransportInterface_SOURCE
@@ -143,7 +148,6 @@ set(PDPTESTS_SOURCE PDPTests.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/network/NetworkFactory.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/network/utils/netmask_filter.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/network/utils/network.cpp
-    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/ChainingTransport.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/network/NetmaskFilterKind.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/network/NetworkInterface.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/network/NetworkInterfaceWithFilter.cpp
@@ -190,14 +194,20 @@ target_include_directories(PDPTests PRIVATE
     )
 
 target_link_libraries(PDPTests
-    fastcdr
     fastdds::log
     foonathan_memory
     GTest::gmock
-    $<$<BOOL:${WIN32}>:iphlpapi$<SEMICOLON>Shlwapi>
-    $<$<BOOL:${WIN32}>:ws2_32>
-    $<$<BOOL:${QNX}>:socket>
     ${CMAKE_DL_LIBS}
-    $<$<BOOL:${LINK_SSL}>:OpenSSL::SSL$<SEMICOLON>OpenSSL::Crypto>)
+    $<$<BOOL:${TLS_FOUND}>:OpenSSL::SSL$<SEMICOLON>OpenSSL::Crypto>)
+if(QNX)
+    target_link_libraries(PDPTests socket)
+endif()
+if(MSVC OR MSVC_IDE)
+    target_link_libraries(PDPTests ${PRIVACY} fastcdr iphlpapi Shlwapi ws2_32)
+elseif(APPLE)
+    target_link_libraries(PDPTests ${PRIVACY} fastcdr "-framework CoreFoundation" "-framework IOKit")
+else()
+    target_link_libraries(PDPTests ${PRIVACY} fastcdr)
+endif()
 
 gtest_discover_tests(PDPTests)

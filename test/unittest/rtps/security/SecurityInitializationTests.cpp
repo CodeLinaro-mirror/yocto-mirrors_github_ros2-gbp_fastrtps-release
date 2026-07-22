@@ -237,7 +237,7 @@ TEST_F(SecurityTest, initialization_logging_error)
     eprosima::fastdds::dds::Log::Flush();
 
     auto log_entries = mockConsumer->ConsumedEntries();
-    ASSERT_GE(log_entries.size(), 1u);
+    ASSERT_GE(log_entries.size(), 1);
     bool found = false;
     for (auto entry : log_entries)
     {

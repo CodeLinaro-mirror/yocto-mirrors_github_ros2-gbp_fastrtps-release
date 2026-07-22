@@ -77,10 +77,14 @@ namespace rtps {
 
 using Log = fastdds::dds::Log;
 
+static const int s_default_keep_alive_frequency = 5000; // 5 SECONDS
+static const int s_default_keep_alive_timeout = 15000; // 15 SECONDS
+//static const int s_clean_deleted_sockets_pool_timeout = 100; // 100 MILLISECONDS
+
 TCPTransportDescriptor::TCPTransportDescriptor()
     : SocketTransportDescriptor(s_maximumMessageSize, s_maximumInitialPeersRange)
-    , keep_alive_frequency_ms(0)
-    , keep_alive_timeout_ms(0)
+    , keep_alive_frequency_ms(s_default_keep_alive_frequency)
+    , keep_alive_timeout_ms(s_default_keep_alive_timeout)
     , max_logical_port(100)
     , logical_port_range(20)
     , logical_port_increment(2)
@@ -164,6 +168,7 @@ TCPTransportInterface::TCPTransportInterface(
 #if TLS_FOUND
     , ssl_context_(asio::ssl::context::sslv23)
 #endif // if TLS_FOUND
+    , keep_alive_event_(io_context_timers_)
 {
 }
 
@@ -175,6 +180,13 @@ void TCPTransportInterface::clean()
 {
     assert(receiver_resources_.size() == 0);
     alive_.store(false);
+
+    keep_alive_event_.cancel();
+    if (io_context_timers_thread_.joinable())
+    {
+        io_context_timers_.stop();
+        io_context_timers_thread_.join();
+    }
 
     {
         std::vector<std::shared_ptr<TCPChannelResource>> channels;
@@ -571,7 +583,15 @@ bool TCPTransportInterface::init(
 
     if (0 < configuration()->keep_alive_frequency_ms)
     {
-        EPROSIMA_LOG_WARNING(RTCP, "Keep alive feature only available in Fast DDS Pro.");
+        auto ioContextTimersFunction = [&]()
+                {
+                    asio::executor_work_guard<asio::io_context::executor_type> work =
+                            make_work_guard(io_context_timers_.
+                                            get_executor());
+                    io_context_timers_.run();
+                };
+        io_context_timers_thread_ = create_thread(ioContextTimersFunction,
+                        configuration()->keep_alive_thread, "dds.tcp_keep");
     }
 
     return true;
@@ -816,10 +836,10 @@ bool TCPTransportInterface::OpenOutputChannel(
         }
     }
 
-    std::shared_ptr<TCPChannelResource> channel;
     // (Server-Client Topology OR LARGE DATA with PDP discovery after TCP connection) - Server side
     if (channel_resource != channel_resources_.end())
     {
+        std::shared_ptr<TCPChannelResource> channel;
         // There is an existing channel in channel_resources_ created for reception with the remote locator as key. Use it.
         channel = channel_resource->second;
         // Add logical port to channel if it's not there yet
@@ -867,7 +887,7 @@ bool TCPTransportInterface::OpenOutputChannel(
             EPROSIMA_LOG_INFO(RTCP, "OpenOutputChannel: [CONNECT] @ " << IPLocator::to_string(locator));
 
             // Create a TCP_CONNECT_TYPE channel
-            channel.reset(
+            std::shared_ptr<TCPChannelResource> channel(
 #if TLS_FOUND
                 (configuration()->apply_security) ?
                 static_cast<TCPChannelResource*>(
@@ -896,7 +916,7 @@ bool TCPTransportInterface::OpenOutputChannel(
 
     statistics_info_.add_entry(locator);
     send_resource_list.emplace_back(
-        static_cast<SenderResource*>(new TCPSenderResource(*this, physical_locator, channel)));
+        static_cast<SenderResource*>(new TCPSenderResource(*this, physical_locator)));
 
     return true;
 }
@@ -1008,7 +1028,7 @@ bool TCPTransportInterface::CreateInitialConnect(
     channel->add_logical_port(logical_port, rtcp_message_manager_.get());
     statistics_info_.add_entry(locator);
     send_resource_list.emplace_back(
-        static_cast<SenderResource*>(new TCPSenderResource(*this, physical_locator, channel)));
+        static_cast<SenderResource*>(new TCPSenderResource(*this, physical_locator)));
 
     std::vector<fastdds::rtps::IPFinder::info_IP> local_interfaces;
     // Check if the locator is from an owned interface to link all local interfaces to the channel
@@ -1054,6 +1074,64 @@ bool TCPTransportInterface::OpenInputChannel(
         }
     }
     return success;
+}
+
+void TCPTransportInterface::keep_alive()
+{
+    std::map<Locator, std::shared_ptr<TCPChannelResource>> tmp_vec;
+
+    {
+        std::unique_lock<std::mutex> scopedLock(sockets_map_mutex_); // Why mutex here?
+        tmp_vec = channel_resources_;
+    }
+
+
+    for (auto& channel_resource : tmp_vec)
+    {
+        if (TCPChannelResource::TCPConnectionType::TCP_CONNECT_TYPE == channel_resource.second->tcp_connection_type())
+        {
+            rtcp_message_manager_->sendKeepAliveRequest(channel_resource.second);
+        }
+    }
+    //TODO Check timeout.
+
+    /*
+       const TCPTransportDescriptor* config = configuration(); // Keep a copy for us.
+
+       std::chrono::time_point<std::chrono::system_clock> time_now = std::chrono::system_clock::now();
+       std::chrono::time_point<std::chrono::system_clock> next_time = time_now +
+        std::chrono::milliseconds(config->keep_alive_frequency_ms);
+       std::chrono::time_point<std::chrono::system_clock> timeout_time =
+        time_now + std::chrono::milliseconds(config->keep_alive_timeout_ms);
+
+       while (channel && TCPChannelResource::TCPConnectionStatus::TCP_CONNECTED == channel->tcp_connection_status())
+       {
+        if (channel->connection_established())
+        {
+            // KeepAlive
+            if (config->keep_alive_frequency_ms > 0 && config->keep_alive_timeout_ms > 0)
+            {
+                time_now = std::chrono::system_clock::now();
+
+                // Keep Alive Management
+                if (!channel->waiting_for_keep_alive_ && time_now > next_time)
+                {
+                    std::unique_lock<std::mutex> scopedLock(sockets_map_mutex_); // Why mutex here?
+                    rtcp_message_manager_->sendKeepAliveRequest(channel);
+                    channel->waiting_for_keep_alive_ = true;
+                    next_time = time_now + std::chrono::milliseconds(config->keep_alive_frequency_ms);
+                    timeout_time = time_now + std::chrono::milliseconds(config->keep_alive_timeout_ms);
+                }
+                else if (channel->waiting_for_keep_alive_ && time_now >= timeout_time)
+                {
+                    // Disable the socket to erase it after the reception.
+                    close_tcp_socket(channel);
+                }
+            }
+        }
+       }
+       EPROSIMA_LOG_INFO(RTCP, "End perform_rtcp_management_thread " << channel->locator());
+     */
 }
 
 void TCPTransportInterface::create_listening_thread(
@@ -1342,7 +1420,18 @@ bool TCPTransportInterface::Receive(
         {
             tcp_header.valid_endianness(msg_endian);
 
-            size_t body_size = tcp_header.length - static_cast<uint32_t>(TCPHeader::size());
+            // Validate header length and calculate body size
+            size_t body_size = 0;
+            if (tcp_header.length >= TCPHeader::size())
+            {
+                body_size = tcp_header.length - static_cast<uint32_t>(TCPHeader::size());
+            }
+            else
+            {
+                EPROSIMA_LOG_ERROR(RTCP_MSG_IN, "Invalid TCP header length: " << tcp_header.length);
+                close_tcp_socket(channel);
+                success = false;
+            }
 
             if (body_size > receive_buffer_capacity)
             {
@@ -1353,16 +1442,19 @@ bool TCPTransportInterface::Receive(
                 // Drop the message
                 size_t to_read = body_size;
                 size_t read_block = receive_buffer_capacity;
-                uint32_t readed;
-                while (read_block > 0)
+                while ((read_block > 0) && !channel->disconnected())
                 {
-                    read_body(receive_buffer, receive_buffer_capacity, &readed, channel,
-                            read_block);
-                    to_read -= readed;
+                    uint32_t num_read;
+                    if (!read_body(receive_buffer, receive_buffer_capacity, &num_read, channel, read_block))
+                    {
+                        // Error message already shown by read_body method.
+                        break;
+                    }
+                    to_read -= num_read;
                     read_block = (to_read >= receive_buffer_capacity) ? receive_buffer_capacity : to_read;
                 }
             }
-            else
+            else if (success)
             {
                 EPROSIMA_LOG_INFO(RTCP_MSG_IN, "Received RTCP MSG. Logical Port " << tcp_header.logical_port);
                 success = read_body(receive_buffer, receive_buffer_capacity, &receive_buffer_size,
@@ -1454,8 +1546,7 @@ bool TCPTransportInterface::send(
         uint32_t total_bytes,
         const fastdds::rtps::Locator_t& locator,
         fastdds::rtps::LocatorsIterator* destination_locators_begin,
-        fastdds::rtps::LocatorsIterator* destination_locators_end,
-        const int32_t /* transport_priority */)
+        fastdds::rtps::LocatorsIterator* destination_locators_end)
 {
     fastdds::rtps::LocatorsIterator& it = *destination_locators_begin;
 
@@ -1739,7 +1830,7 @@ bool TCPTransportInterface::getDefaultMetatrafficMulticastLocators(
         uint32_t ) const
 {
     // TCP doesn't have multicast support
-    return false;
+    return true;
 }
 
 bool TCPTransportInterface::getDefaultMetatrafficUnicastLocators(
@@ -1771,7 +1862,7 @@ bool TCPTransportInterface::fillMetatrafficMulticastLocator(
         uint32_t) const
 {
     // TCP doesn't have multicast support
-    return false;
+    return true;
 }
 
 bool TCPTransportInterface::fillMetatrafficUnicastLocator(
@@ -2089,24 +2180,8 @@ void TCPTransportInterface::cleanup_sender_resources(
             {
                 if (tcp_sender_resource->locator() == remote_participant_physical_locator)
                 {
-                    // Keep the send resource only if a *different* connected channel currently owns this physical
-                    // locator (reconnection of a client with a listening port; see fill_local_physical_port).
-                    // The original (tearing-down) channel must still be cleaned up even if it is momentarily in
-                    // eEstablished because its UNBIND has not yet been processed by the listener thread.
-                    auto channel_resource_it = channel_resources_.find(tcp_sender_resource->locator());
-                    bool should_erase = true;
-                    if (channel_resource_it != channel_resources_.end() && channel_resource_it->second->connected())
-                    {
-                        const auto& stored = tcp_sender_resource->channel();
-                        const auto& current = channel_resource_it->second;
-                        const bool same_channel = !stored.owner_before(current) && !current.owner_before(stored);
-                        should_erase = same_channel;
-                    }
-                    if (should_erase)
-                    {
-                        it = send_resource_list.erase(it);
-                        continue;
-                    }
+                    it = send_resource_list.erase(it);
+                    continue;
                 }
             }
             ++it;

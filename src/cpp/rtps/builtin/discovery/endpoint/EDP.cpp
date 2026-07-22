@@ -30,8 +30,6 @@
 #include <fastdds/dds/publisher/qos/WriterQos.hpp>
 #include <fastdds/rtps/builtin/data/TopicDescription.hpp>
 #include <fastdds/rtps/history/WriterHistory.hpp>
-#include <fastdds/rtps/participant/RTPSParticipant.hpp>
-#include <fastdds/rtps/participant/RTPSParticipantListener.hpp>
 #include <fastdds/rtps/reader/ReaderListener.hpp>
 #include <fastdds/rtps/reader/RTPSReader.hpp>
 #include <fastdds/rtps/writer/RTPSWriter.hpp>
@@ -46,7 +44,7 @@
 #include <rtps/network/utils/external_locators.hpp>
 #include <rtps/participant/RTPSParticipantImpl.hpp>
 #include <rtps/reader/BaseReader.hpp>
-#include <rtps/domain/RTPSDomainImpl.hpp>
+#include <rtps/RTPSDomainImpl.hpp>
 #include <utils/BuiltinTopicKeyConversions.hpp>
 #if HAVE_SECURITY
 #include <rtps/security/accesscontrol/ParticipantSecurityAttributes.h>
@@ -322,7 +320,6 @@ dds::ReturnCode_t EDP::new_reader_proxy_data(
                     }
                 }
 
-                rpd->related_datawriter_key = sub_builtin_topic_data.related_datawriter_key;
                 rpd->set_qos(sub_builtin_topic_data, true);
                 rpd->user_defined_id(ratt.getUserDefinedID());
                 if (nullptr != content_filter)
@@ -600,7 +597,7 @@ dds::ReturnCode_t EDP::new_writer_proxy_data(
                         }
                     }
                 }
-                wpd->related_datareader_key = pub_builtin_topic_data.related_datareader_key;
+
                 BaseWriter* base_writer = BaseWriter::downcast(rtps_writer);
                 assert(base_writer->get_history() != nullptr);
                 wpd->type_max_serialized(base_writer->get_history()->getTypeMaxSerialized());
@@ -1102,22 +1099,6 @@ ProxyPool<WriterProxyData>& EDP::get_temporary_writer_proxies_pool()
     return mp_PDP->get_temporary_writer_proxies_pool();
 }
 
-bool EDP::user_valid_matching(
-        const ReaderProxyData& rdata,
-        const WriterProxyData& wdata) const
-{
-    auto* participant = this->mp_PDP->getRTPSParticipant();
-    auto* listener = participant->getListener();
-
-    if (nullptr == listener)
-    {
-        return true;
-    }
-
-    return listener->should_endpoints_match(
-        participant->getUserRTPSParticipant(), rdata, wdata);
-}
-
 //TODO This four functions share common code (2 to 2) and surely can be templatized.
 
 bool EDP::pairingReader(
@@ -1146,8 +1127,6 @@ bool EDP::pairingReader(
             MatchingFailureMask no_match_reason;
             fastdds::dds::PolicyMask incompatible_qos;
             bool valid = valid_matching(&rdata, wdatait, no_match_reason, incompatible_qos);
-            valid = valid && user_valid_matching(rdata, *wdatait);
-
             const GUID_t& reader_guid = reader->getGuid();
             const GUID_t& writer_guid = wdatait->guid;
 
@@ -1243,7 +1222,6 @@ bool EDP::pairingWriter(
             MatchingFailureMask no_match_reason;
             fastdds::dds::PolicyMask incompatible_qos;
             bool valid = valid_matching(&wdata, rdatait, no_match_reason, incompatible_qos);
-            valid = valid && user_valid_matching(*rdatait, wdata);
 
             if (valid)
             {
@@ -1319,7 +1297,6 @@ bool EDP::pairing_reader_proxy_with_any_local_writer(
                     MatchingFailureMask no_match_reason;
                     fastdds::dds::PolicyMask incompatible_qos;
                     bool valid = valid_matching(temp_writer_proxy_data.get(), rdata, no_match_reason, incompatible_qos);
-                    valid = valid && user_valid_matching(*rdata, *temp_writer_proxy_data);
                     const GUID_t& reader_guid = rdata->guid;
 
                     temp_writer_proxy_data.reset();
@@ -1404,9 +1381,8 @@ bool EDP::pairing_reader_proxy_with_local_writer(
                     {
                         MatchingFailureMask no_match_reason;
                         fastdds::dds::PolicyMask incompatible_qos;
-                        bool valid;
-                        valid = valid_matching(temp_writer_proxy_data.get(), &rdata, no_match_reason, incompatible_qos);
-                        valid = valid && user_valid_matching(rdata, *temp_writer_proxy_data);
+                        bool valid = valid_matching(temp_writer_proxy_data.get(), &rdata, no_match_reason,
+                        incompatible_qos);
 
                         temp_writer_proxy_data.reset();
 
@@ -1515,7 +1491,6 @@ bool EDP::pairing_writer_proxy_with_any_local_reader(
                     MatchingFailureMask no_match_reason;
                     fastdds::dds::PolicyMask incompatible_qos;
                     bool valid = valid_matching(temp_reader_proxy_data.get(), wdata, no_match_reason, incompatible_qos);
-                    valid = valid && user_valid_matching(*temp_reader_proxy_data, *wdata);
                     const GUID_t& writer_guid = wdata->guid;
 
                     temp_reader_proxy_data.reset();
@@ -1599,9 +1574,8 @@ bool EDP::pairing_writer_proxy_with_local_reader(
                     {
                         MatchingFailureMask no_match_reason;
                         fastdds::dds::PolicyMask incompatible_qos;
-                        bool valid;
-                        valid = valid_matching(temp_reader_proxy_data.get(), &wdata, no_match_reason, incompatible_qos);
-                        valid = valid && user_valid_matching(*temp_reader_proxy_data, wdata);
+                        bool valid = valid_matching(temp_reader_proxy_data.get(), &wdata, no_match_reason,
+                        incompatible_qos);
                         const GUID_t& writer_guid = wdata.guid;
 
                         temp_reader_proxy_data.reset();

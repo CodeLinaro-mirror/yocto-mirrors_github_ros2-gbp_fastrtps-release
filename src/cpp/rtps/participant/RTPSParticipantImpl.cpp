@@ -35,14 +35,11 @@
 #include <fastdds/rtps/history/WriterHistory.hpp>
 #include <fastdds/rtps/participant/ParticipantDiscoveryInfo.hpp>
 #include <fastdds/rtps/participant/RTPSParticipant.hpp>
-#include <fastdds/rtps/participant/RTPSParticipantListener.hpp>
-#include <fastdds/rtps/reader/ReaderDiscoveryStatus.hpp>
 #include <fastdds/rtps/RTPSDomain.hpp>
 #include <fastdds/rtps/transport/shared_mem/SharedMemTransportDescriptor.hpp>
 #include <fastdds/rtps/transport/TCPv4TransportDescriptor.hpp>
 #include <fastdds/rtps/transport/TCPv6TransportDescriptor.hpp>
 #include <fastdds/rtps/transport/UDPv4TransportDescriptor.hpp>
-#include <fastdds/rtps/writer/WriterDiscoveryStatus.hpp>
 #include <fastdds/utils/IPFinder.hpp>
 
 #include <fastdds/utils/TypePropagation.hpp>
@@ -120,8 +117,8 @@ static void set_builtin_transports_from_env_var(
                     "LARGE_DATAv6", BuiltinTransports::LARGE_DATAv6,
                     "P2P", BuiltinTransports::P2P))
             {
-                EPROSIMA_LOG_ERROR(RTPS_PARTICIPANT, "Wrong value '" << env_value << "' for environment variable '"
-                                                                     << env_var_name << "'. Leaving as DEFAULT");
+                EPROSIMA_LOG_ERROR(RTPS_PARTICIPANT, "Wrong value '" << env_value << "' for environment variable '" <<
+                        env_var_name << "'. Leaving as DEFAULT");
             }
         }
         else if (std::regex_match(env_value, mr, OPTIONS_REGEX, std::regex_constants::match_not_null))
@@ -148,8 +145,8 @@ static void set_builtin_transports_from_env_var(
                         "P2P", BuiltinTransports::P2P))
                 {
                     EPROSIMA_LOG_ERROR(RTPS_PARTICIPANT,
-                            "Wrong value '" << env_value << "' for environment variable '"
-                                            << env_var_name << "'. Leaving as DEFAULT");
+                            "Wrong value '" << env_value << "' for environment variable '" <<
+                            env_var_name << "'. Leaving as DEFAULT");
                 }
                 // Max_msg_size parser
                 if (std::regex_search(env_value, mr, msg_size_regex, std::regex_constants::match_not_null))
@@ -181,16 +178,16 @@ static void set_builtin_transports_from_env_var(
             catch (std::exception& e)
             {
                 EPROSIMA_LOG_ERROR(RTPS_PARTICIPANT,
-                        "Exception parsing environment variable: " << e.what()
-                                                                   << " Leaving LARGE_DATA with default options.");
+                        "Exception parsing environment variable: " << e.what() <<
+                        " Leaving LARGE_DATA with default options.");
                 attr.setup_transports(ret_val);
                 return;
             }
         }
         else
         {
-            EPROSIMA_LOG_ERROR(RTPS_PARTICIPANT, "Wrong value '" << env_value << "' for environment variable '"
-                                                                 << env_var_name << "'. Leaving as DEFAULT");
+            EPROSIMA_LOG_ERROR(RTPS_PARTICIPANT, "Wrong value '" << env_value << "' for environment variable '" <<
+                    env_var_name << "'. Leaving as DEFAULT");
         }
     }
     attr.setup_transports(ret_val);
@@ -234,25 +231,6 @@ static bool get_unique_flows_parameters(
     }
 
     return true;
-}
-
-/**
- * @brief This method checks if the maximum message size is equal or higher than the PDP package size.
- * @return true if the maximum message size is equal or higher than the PDP package size, false otherwise.
- */
-static bool is_max_message_size_big_enough(
-        const uint32_t max_message_size)
-{
-    constexpr uint32_t info_dst_message_length = 16;
-    constexpr uint32_t info_ts_message_length = 12;
-    uint32_t statistics_message_length = 0;
-#ifdef FASTDDS_STATISTICS
-    statistics_message_length = eprosima::fastdds::statistics::rtps::statistics_submessage_length;
-#endif // FASTDDS_STATISTICS
-
-    return max_message_size >=
-           (RTPSMESSAGE_HEADER_SIZE + BUILTIN_DATA_MAX_SIZE + info_dst_message_length +
-           info_ts_message_length + statistics_message_length);
 }
 
 Locator_t& RTPSParticipantImpl::applyLocatorAdaptRule(
@@ -421,8 +399,7 @@ bool RTPSParticipantImpl::setup_transports()
                     if (pT->listening_ports.empty())
                     {
                         EPROSIMA_LOG_ERROR(RTPS_PARTICIPANT,
-                                "Participant " << m_att.getName() << " with GUID " << m_guid
-                                               <<
+                                "Participant " << m_att.getName() << " with GUID " << m_guid <<
                                 " tries to create a TCP server for discovery server without providing a proper listening port.");
                         return false;
                     }
@@ -467,10 +444,8 @@ bool RTPSParticipantImpl::setup_transports()
                     if (pT->listening_ports.empty())
                     {
                         EPROSIMA_LOG_INFO(RTPS_PARTICIPANT,
-                                "Participant " << m_att.getName() << " with GUID " << m_guid
-                                               <<
-                                " tries to create a TCP client without providing a proper listening port."
-                                               <<
+                                "Participant " << m_att.getName() << " with GUID " << m_guid <<
+                                " tries to create a TCP client without providing a proper listening port." <<
                                 " No incomming connections will be accepted, only outgoing connections.");
                     }
                     std::for_each(m_att.builtin.discovery_config.m_DiscoveryServers.begin(),
@@ -516,14 +491,6 @@ bool RTPSParticipantImpl::setup_transports()
                 register_transport = false;
             }
         }
-        auto max_message_size = transportDescriptor->max_message_size();
-        if (!is_max_message_size_big_enough(max_message_size))
-        {
-            EPROSIMA_LOG_ERROR(RTPS_PARTICIPANT,
-                    "User transport failed to register. Maximum message size needs to be equal or higher than "
-                    "the PDP package size.");
-            register_transport = false;
-        }
 
         bool transport_registered = register_transport && m_network_Factory.RegisterTransport(
             transportDescriptor.get(), &m_att.properties, m_att.max_msg_size_no_frag);
@@ -539,12 +506,12 @@ bool RTPSParticipantImpl::setup_transports()
         if (transport_registered)
         {
             has_shm_transport_ |=
-                    (nullptr != dynamic_cast<SharedMemTransportDescriptor*>(transportDescriptor.get()));
+                    (dynamic_cast<SharedMemTransportDescriptor*>(transportDescriptor.get()) != nullptr);
         }
         else
         {
             // SHM transport could be disabled
-            if ((nullptr != dynamic_cast<SharedMemTransportDescriptor*>(transportDescriptor.get())))
+            if ((dynamic_cast<SharedMemTransportDescriptor*>(transportDescriptor.get()) != nullptr))
             {
                 EPROSIMA_LOG_ERROR(RTPS_PARTICIPANT,
                         "Unable to Register SHM Transport. SHM Transport is not supported in"
@@ -682,7 +649,6 @@ void RTPSParticipantImpl::setup_user_traffic()
         std::for_each(m_att.defaultUnicastLocatorList.begin(), m_att.defaultUnicastLocatorList.end(),
                 [&](Locator_t& loc)
                 {
-                    // This methods always leaves the address unchanged
                     m_network_Factory.fill_default_locator_port(loc, default_unicast_port_);
                 });
         m_network_Factory.NormalizeLocators(m_att.defaultUnicastLocatorList);
@@ -692,8 +658,7 @@ void RTPSParticipantImpl::setup_user_traffic()
         std::for_each(m_att.defaultMulticastLocatorList.begin(), m_att.defaultMulticastLocatorList.end(),
                 [&](Locator_t& loc)
                 {
-                    // This methods leaves the address unchanged if it was already set
-                    m_network_Factory.fill_default_multicast_locator(loc, multicast_port);
+                    m_network_Factory.fill_default_locator_port(loc, multicast_port);
                 });
     }
 
@@ -843,7 +808,7 @@ RTPSParticipantImpl::~RTPSParticipantImpl()
     send_resource_list_.clear();
 }
 
-template<EndpointKind_t kind, octet no_key, octet with_key>
+template <EndpointKind_t kind, octet no_key, octet with_key>
 bool RTPSParticipantImpl::preprocess_endpoint_attributes(
         const EntityId_t& entity_id,
         std::atomic<uint32_t>& id_counter,
@@ -1078,7 +1043,7 @@ bool RTPSParticipantImpl::create_writer(
     return true;
 }
 
-template<typename Functor>
+template <typename Functor>
 bool RTPSParticipantImpl::create_reader(
         RTPSReader** reader_out,
         ReaderAttributes& param,
@@ -1289,12 +1254,11 @@ bool RTPSParticipantImpl::create_writer(
                     if (persistence != nullptr)
                     {
                         writer = new StatefulPersistentWriter(this, guid, watt,
-                                        flow_controller, hist, listen, stateful_writer_listener_, persistence);
+                                        flow_controller, hist, listen, persistence);
                     }
                     else
                     {
-                        writer = new StatefulWriter(this, guid, watt,
-                                        flow_controller, hist, listen, stateful_writer_listener_);
+                        writer = new StatefulWriter(this, guid, watt, flow_controller, hist, listen);
                     }
                 }
                 else
@@ -1532,6 +1496,14 @@ void RTPSParticipantImpl::update_attributes(
     }
 
     bool local_interfaces_changed = false;
+
+    // Update cached network interfaces
+    if (!SystemInfo::update_interfaces())
+    {
+        EPROSIMA_LOG_WARNING(RTPS_PARTICIPANT,
+                "Failed to update cached network interfaces during " << temp_atts.getName() <<
+                " attributes update");
+    }
 
     // Check if new interfaces have been added
     if (internal_metatraffic_locators_)
@@ -1973,8 +1945,8 @@ bool RTPSParticipantImpl::createSendResources(
     {
         if (!m_network_Factory.build_send_resources(send_resource_list_, (*it)))
         {
-            EPROSIMA_LOG_WARNING(RTPS_PARTICIPANT, "Cannot create send resource for endpoint remote locator ("
-                    << pend->getGuid() << ", " << (*it) << ")");
+            EPROSIMA_LOG_WARNING(RTPS_PARTICIPANT, "Cannot create send resource for endpoint remote locator (" <<
+                    pend->getGuid() << ", " << (*it) << ")");
         }
     }
 
@@ -2350,7 +2322,7 @@ void RTPSParticipantImpl::normalize_endpoint_locators(
     uint32_t multicast_port = m_network_Factory.calculate_well_known_port(domain_id_, m_att, true);
     for (Locator_t& loc : endpoint_att.multicastLocatorList)
     {
-        m_network_Factory.fill_default_multicast_locator(loc, multicast_port);
+        m_network_Factory.fill_default_locator_port(loc, multicast_port);
     }
 
     // Normalize unicast locators
@@ -2458,11 +2430,11 @@ uint32_t RTPSParticipantImpl::getMaxMessageSize() const
 #endif // if HAVE_SECURITY
 
     return (std::min)(
-        {
-            max_output_message_size_,
-            m_network_Factory.get_max_message_size_between_transports(),
-            max_receiver_buffer_size
-        });
+                {
+                    max_output_message_size_,
+                    m_network_Factory.get_max_message_size_between_transports(),
+                    max_receiver_buffer_size
+                });
 }
 
 uint32_t RTPSParticipantImpl::getMaxDataSize()
@@ -2685,7 +2657,7 @@ std::unique_ptr<RTPSMessageGroup_t> RTPSParticipantImpl::get_send_buffer(
 }
 
 void RTPSParticipantImpl::return_send_buffer(
-        std::unique_ptr<RTPSMessageGroup_t>&& buffer)
+        std::unique_ptr <RTPSMessageGroup_t>&& buffer)
 {
     send_buffers_->return_buffer(std::move(buffer));
 }
@@ -2908,8 +2880,8 @@ void RTPSParticipantImpl::environment_file_has_changed()
     else
     {
         EPROSIMA_LOG_WARNING(RTPS_QOS_CHECK,
-                "Trying to add Discovery Servers to a participant which is not a SERVER, BACKUP "
-                << "or an overriden CLIENT (SIMPLE participant transformed into CLIENT with the environment variable)");
+                "Trying to add Discovery Servers to a participant which is not a SERVER, BACKUP " <<
+                "or an overriden CLIENT (SIMPLE participant transformed into CLIENT with the environment variable)");
     }
 }
 
@@ -3416,8 +3388,8 @@ bool RTPSParticipantImpl::should_match_local_endpoints(
         {
             should_match_local_endpoints = true;
             EPROSIMA_LOG_ERROR(RTPS_PARTICIPANT,
-                    "Unkown value '" << *ignore_local_endpoints
-                                     << "' for property 'fastdds.ignore_local_endpoints'. Setting value to 'true'");
+                    "Unkown value '" << *ignore_local_endpoints <<
+                    "' for property 'fastdds.ignore_local_endpoints'. Setting value to 'true'");
         }
     }
     return should_match_local_endpoints;
@@ -3471,48 +3443,6 @@ RTPSParticipantAttributes RTPSParticipantImpl::copy_attributes() const
 {
     std::lock_guard<std::mutex> _(mutex_);
     return m_att;
-}
-
-void RTPSParticipantImpl::notify_reader_discovery(
-        ReaderDiscoveryStatus reason,
-        const SubscriptionBuiltinTopicData& info)
-{
-    RTPSParticipantListener* listener = getListener();
-    notify_reader_discovery(reason, info, listener);
-}
-
-void RTPSParticipantImpl::notify_reader_discovery(
-        ReaderDiscoveryStatus reason,
-        const SubscriptionBuiltinTopicData& info,
-        RTPSParticipantListener* listener)
-{
-    if (listener)
-    {
-        RTPSParticipant* participant = getUserRTPSParticipant();
-        bool should_be_ignored = false;
-        listener->on_reader_discovery(participant, reason, info, should_be_ignored);
-    }
-}
-
-void RTPSParticipantImpl::notify_writer_discovery(
-        WriterDiscoveryStatus reason,
-        const PublicationBuiltinTopicData& info)
-{
-    RTPSParticipantListener* listener = getListener();
-    notify_writer_discovery(reason, info, listener);
-}
-
-void RTPSParticipantImpl::notify_writer_discovery(
-        WriterDiscoveryStatus reason,
-        const PublicationBuiltinTopicData& info,
-        RTPSParticipantListener* listener)
-{
-    if (listener)
-    {
-        RTPSParticipant* participant = getUserRTPSParticipant();
-        bool should_be_ignored = false;
-        listener->on_writer_discovery(participant, reason, info, should_be_ignored);
-    }
 }
 
 } /* namespace rtps */

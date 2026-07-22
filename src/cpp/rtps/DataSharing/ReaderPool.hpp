@@ -59,7 +59,6 @@ public:
             payload.data = data.data;
             payload.length = data.length;
             payload.max_size = data.length;
-            payload.is_serialized_key = data.is_serialized_key;
             payload.payload_owner = this;
             return true;
         }
@@ -255,6 +254,7 @@ public:
         if (check == c_SequenceNumber_Unknown || check != cache_change.sequenceNumber)
         {
             // data override while processing
+            cache_change.serializedPayload.data = nullptr;
             return false;
         }
 

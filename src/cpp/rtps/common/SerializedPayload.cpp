@@ -30,13 +30,24 @@ SerializedPayload_t& SerializedPayload_t::operator = (
         return *this;
     }
 
+    if (payload_owner != nullptr)
+    {
+        bool success =  payload_owner->release_payload(*this);
+        static_cast<void>(success);
+        assert(success);
+        payload_owner = nullptr;
+    }
+    else if (data != nullptr)
+    {
+        free(data);
+    }
+
     encapsulation = other.encapsulation;
     length = other.length;
     data = other.data;
     max_size = other.max_size;
     pos = other.pos;
     payload_owner = other.payload_owner;
-    is_serialized_key = other.is_serialized_key;
 
     other.encapsulation = CDR_BE;
     other.length = 0;
@@ -44,7 +55,6 @@ SerializedPayload_t& SerializedPayload_t::operator = (
     other.max_size = 0;
     other.pos = 0;
     other.payload_owner = nullptr;
-    other.is_serialized_key = false;
 
     return *this;
 }
@@ -53,7 +63,10 @@ SerializedPayload_t::~SerializedPayload_t()
 {
     if (payload_owner != nullptr)
     {
-        payload_owner->release_payload(*this);
+        bool success = payload_owner->release_payload(*this);
+        static_cast<void>(success);
+        assert(success);
+        payload_owner = nullptr;
     }
     this->empty();
 }
@@ -62,7 +75,6 @@ bool SerializedPayload_t::operator == (
         const SerializedPayload_t& other) const
 {
     return ((encapsulation == other.encapsulation) &&
-           (is_serialized_key == other.is_serialized_key) &&
            (length == other.length) &&
            (length == 0 || 0 == memcmp(data, other.data, length)));
 }
@@ -85,7 +97,6 @@ bool SerializedPayload_t::copy(
         }
     }
     encapsulation = serData->encapsulation;
-    is_serialized_key = serData->is_serialized_key;
     if (length == 0)
     {
         return true;
@@ -100,7 +111,6 @@ bool SerializedPayload_t::reserve_fragmented(
     length = serData->length;
     max_size = serData->length;
     encapsulation = serData->encapsulation;
-    is_serialized_key = serData->is_serialized_key;
     data = (octet*)calloc(length, sizeof(octet));
     return true;
 }
@@ -117,7 +127,6 @@ void SerializedPayload_t::empty()
         free(data);
     }
     data = nullptr;
-    is_serialized_key = false;
 }
 
 void SerializedPayload_t::reserve(

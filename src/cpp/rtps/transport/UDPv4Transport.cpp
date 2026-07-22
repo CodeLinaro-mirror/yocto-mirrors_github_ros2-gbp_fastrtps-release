@@ -194,10 +194,9 @@ UDPv4Transport::UDPv4Transport(
                     {
                         EPROSIMA_LOG_WARNING(TRANSPORT_UDPV4,
                                 "Ignoring allowed interface " << infoIP.dev << ": " << infoIP.name
-                                                              << " as its netmask filter configuration ("
-                                                              << netmask_filter << ") is incompatible"
-                                                              << " with descriptor's (" << descriptor.netmask_filter
-                                                              << ").");
+                                                              << " as its netmask filter configuration (" << netmask_filter << ") is incompatible"
+                                                              << " with descriptor's (" << descriptor.netmask_filter <<
+                                ").");
                     }
                 }
             }
@@ -257,18 +256,6 @@ bool UDPv4Transport::getDefaultMetatrafficMulticastLocators(
     locator.kind = LOCATOR_KIND_UDPv4;
     locator.port = static_cast<uint16_t>(metatraffic_multicast_port);
     IPLocator::setIPv4(locator, DEFAULT_METATRAFFIC_MULTICAST_ADDRESS);
-    locators.push_back(locator);
-    return true;
-}
-
-bool UDPv4Transport::getDefaultMulticastLocators(
-        LocatorList& locators,
-        uint32_t multicast_port) const
-{
-    Locator locator;
-    locator.kind = LOCATOR_KIND_UDPv4;
-    locator.port = static_cast<uint16_t>(multicast_port);
-    IPLocator::setIPv4(locator, DEFAULT_MULTICAST_ADDRESS);
     locators.push_back(locator);
     return true;
 }
@@ -503,11 +490,9 @@ bool UDPv4Transport::OpenInputChannel(
                 catch (asio::system_error const& e)
                 {
                     (void)e;
-                    EPROSIMA_LOG_WARNING(TRANSPORT_UDPV4,
-                            "UDPTransport Error binding " << locatorAddressStr << " at port: ("
-                                                          << IPLocator::getPhysicalPort(
+                    EPROSIMA_LOG_WARNING(TRANSPORT_UDPV4, "UDPTransport Error binding " << locatorAddressStr << " at port: (" << IPLocator::getPhysicalPort(
                                 locator) << ")"
-                                                          << " with msg: " << e.what());
+                                                                                        << " with msg: " << e.what());
                 }
             }
         }

@@ -339,7 +339,7 @@ protected:
             // Ensure writer is in clean state
             drop_data_on_all_readers();
             EXPECT_TRUE(writer.waitForAllAcked(std::chrono::seconds(5)));
-            EXPECT_EQ(reader->get_unread_count(), 0ull);
+            EXPECT_EQ(reader->get_unread_count(), 0);
 
             // Send 10 samples with index 1 to 10
             auto data = default_helloworld_data_generator();
@@ -371,7 +371,7 @@ protected:
             ReturnCode_t expected_ret;
             expected_ret = expected_samples == 0 ? RETCODE_NO_DATA : RETCODE_OK;
             EXPECT_EQ(expected_ret, reader->take(recv_data, recv_info));
-            EXPECT_EQ(static_cast<uint64_t>(recv_data.length()), expected_samples);
+            EXPECT_EQ(recv_data.length(), expected_samples);
             for (HelloWorldSeq::size_type i = 0;
                     i < recv_data.length() && static_cast<uint32_t>(i) < expected_samples;
                     ++i)
@@ -718,99 +718,6 @@ TEST(DDSContentFilter, OnlyFilterAliveChanges)
     ASSERT_EQ(reader.valid_samples.load(), 10u);
     ASSERT_EQ(reader.invalid_samples.load(), 10u);
     ASSERT_EQ(reader.get_sample_lost_status().total_count, 0);
-}
-
-/**
- * @test DataWriter Sample prefilter feature
- *
- * This test asserts that prefiltering with an active content filter works correctly.
- * It creates a ContentFilteredTopic an expression that only accepts samples with index <= 6.
- * On its side, the prefilter is set to only accept samples with 4 < index < 8
- */
-TEST_P(DDSContentFilter, filter_with_prefilter)
-{
-    // TODO(Mario-DL): Remove when multiple filtering readers case is fixed for data-sharing
-    if (enable_datasharing)
-    {
-        GTEST_SKIP() << "Several filtering readers not correctly working on data sharing";
-    }
-
-    struct CustomUserWriteData : public rtps::WriteParams::UserWriteData
-    {
-        CustomUserWriteData(
-                const uint16_t& upper_bound_idx,
-                const uint16_t& lower_bound_idx )
-            : upper_bound_idx_(upper_bound_idx)
-            , lower_bound_idx_(lower_bound_idx)
-        {
-        }
-
-        uint16_t upper_bound_idx_;
-        uint16_t lower_bound_idx_;
-    };
-
-    struct CustomPreFilter : public eprosima::fastdds::dds::IContentFilter
-    {
-        ~CustomPreFilter() override = default;
-
-        //! Custom filter for the HelloWorld example
-        bool evaluate(
-                const SerializedPayload& payload,
-                const FilterSampleInfo& filter_sample_info,
-                const rtps::GUID_t&) const override
-        {
-            HelloWorldPubSubType hello_world_type_support;
-            HelloWorld hello_world_sample;
-            hello_world_type_support.deserialize(*const_cast<SerializedPayload*>(&payload), &hello_world_sample);
-
-            bool sample_should_be_sent = true;
-
-            auto custom_write_data =
-                    std::static_pointer_cast<CustomUserWriteData>(filter_sample_info.user_write_data);
-
-            // Filter out samples
-            if (hello_world_sample.index() > custom_write_data->upper_bound_idx_ ||
-                    hello_world_sample.index() < custom_write_data->lower_bound_idx_)
-            {
-                sample_should_be_sent = false;
-            }
-            return sample_should_be_sent;
-        }
-
-    };
-
-    PubSubWriter<HelloWorldPubSubType> writer(TEST_TOPIC_NAME);
-    PubSubReader<HelloWorldPubSubType> reader(TEST_TOPIC_NAME, "index <= %0", {"6"}, true, false, false);
-
-    // Initialize writer and the filtered reader
-    TestState state;
-    writer.init();
-    ASSERT_TRUE(writer.isInitialized());
-    reader.init();
-    ASSERT_TRUE(reader.isInitialized());
-
-    // wait for discovery between writer and filtered reader
-    writer.wait_discovery();
-    reader.wait_discovery();
-
-    // Set a prefilter on the filtered reader
-    ASSERT_EQ(writer.set_sample_prefilter(
-                std::make_shared<CustomPreFilter>()),
-            eprosima::fastdds::dds::RETCODE_OK);
-
-    // Set a user write data on the writer to filter out samples 4 < index < 8
-    rtps::WriteParams write_params;
-    write_params.user_write_data(std::make_shared<CustomUserWriteData>(
-                (uint16_t)8u, (uint16_t)4u));
-
-    auto data = default_helloworld_data_generator();
-
-    reader.startReception(data);
-
-    writer.send(data, 50, &write_params);
-
-    // Reader should have received 3 samples
-    ASSERT_EQ(reader.block_for_all(std::chrono::seconds(1)), 3u);
 }
 
 /*!
@@ -1282,4 +1189,3 @@ GTEST_INSTANTIATE_TEST_MACRO(DDSContentFilter,
 } // namespace dds
 } // namespace fastdds
 } // namespace eprosima
-

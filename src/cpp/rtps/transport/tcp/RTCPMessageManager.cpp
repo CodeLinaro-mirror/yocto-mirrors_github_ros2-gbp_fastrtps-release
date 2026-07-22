@@ -467,8 +467,8 @@ ResponseCode RTCPMessageManager::processBindConnectionRequest(
     {
         sendData(channel, BIND_CONNECTION_RESPONSE, transaction_id, &payload, RETCODE_INCOMPATIBLE_VERSION);
         EPROSIMA_LOG_WARNING(RTCP, "Rejected client due to INCOMPATIBLE_VERSION: Expected: " << c_rtcpProtocolVersion
-                                                                                             << " but received "
-                                                                                             << request.protocolVersion());
+                                                                                             << " but received " <<
+                request.protocolVersion());
         return RETCODE_INCOMPATIBLE_VERSION;
     }
 
@@ -666,7 +666,7 @@ ResponseCode RTCPMessageManager::processOpenLogicalPortResponse(
 }
 
 ResponseCode RTCPMessageManager::processKeepAliveResponse(
-        std::shared_ptr<TCPChannelResource>& /*channel*/,
+        std::shared_ptr<TCPChannelResource>& channel,
         ResponseCode respCode,
         const TCPTransactionId& transaction_id)
 {
@@ -675,6 +675,7 @@ ResponseCode RTCPMessageManager::processKeepAliveResponse(
         switch (respCode)
         {
             case RETCODE_OK:
+                channel->waiting_for_keep_alive_ = false;
                 break;
             case RETCODE_UNKNOWN_LOCATOR:
                 return RETCODE_UNKNOWN_LOCATOR;

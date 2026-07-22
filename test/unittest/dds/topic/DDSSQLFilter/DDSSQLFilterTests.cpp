@@ -693,7 +693,7 @@ public:
 
     static const std::array<std::pair<std::string, std::string>, 6>& ops()
     {
-        static const std::array<std::pair<std::string, std::string>, 6> the_ops =
+        static const std::array < std::pair<std::string, std::string>, 6 > the_ops =
         {
             std::pair<std::string, std::string>{"=",  "eq"},
             std::pair<std::string, std::string>{"<>", "ne"},
@@ -1311,36 +1311,6 @@ TEST_F(DDSSQLFilterValueTests, test_update_params)
     results[0] = results[4] = true;
     ret = uut.create_content_filter("DDSSQL", "ContentFilterTestType", &type_support, nullptr, params, filter);
     EXPECT_EQ(RETCODE_OK, ret);
-    perform_basic_check(filter, results, values);
-
-    ret = uut.delete_content_filter("DDSSQL", filter);
-    EXPECT_EQ(RETCODE_OK, ret);
-}
-
-// Check that key-only payloads always pass the filter
-TEST_F(DDSSQLFilterValueTests, key_only_payload)
-{
-    static const std::string expression = "string_field MATCH %0 OR string_field LIKE %1";
-
-    IContentFilter* filter = nullptr;
-    auto ret = create_content_filter(uut, expression, { "'BBB'", "'X'" }, &type_support, filter);
-    EXPECT_EQ(RETCODE_OK, ret);
-    ASSERT_NE(nullptr, filter);
-
-    // Create a copy of the default values, but with the key-only payload
-    const auto& initial_values = DDSSQLFilterValueGlobalData::values();
-    std::vector<std::unique_ptr<IContentFilter::SerializedPayload>> values;
-    values.reserve(initial_values.size());
-    for (const auto& value : initial_values)
-    {
-        auto payload = new IContentFilter::SerializedPayload(value->max_size);
-        payload->copy(value.get());
-        payload->is_serialized_key = true;
-        values.emplace_back(std::move(payload));
-    }
-    std::array<bool, 5> results{ true, true, true, true, true };
-
-    ASSERT_EQ(results.size(), values.size());
     perform_basic_check(filter, results, values);
 
     ret = uut.delete_content_filter("DDSSQL", filter);

@@ -31,6 +31,12 @@ namespace fastdds {
 namespace statistics {
 namespace dds {
 
+DomainParticipant::DomainParticipant(
+        const eprosima::fastdds::dds::StatusMask& mask)
+    : eprosima::fastdds::dds::DomainParticipant(mask)
+{
+}
+
 fastdds::dds::ReturnCode_t DomainParticipant::enable_statistics_datawriter(
         const std::string& topic_name,
         const eprosima::fastdds::dds::DataWriterQos& dwqos)
@@ -76,7 +82,7 @@ DomainParticipant* DomainParticipant::narrow(
         eprosima::fastdds::dds::DomainParticipant* domain_participant)
 {
 #ifdef FASTDDS_STATISTICS
-    return reinterpret_cast<DomainParticipant*>(domain_participant);
+    return static_cast<DomainParticipant*>(domain_participant);
 #else
     (void)domain_participant;
     return nullptr;
@@ -87,7 +93,7 @@ const DomainParticipant* DomainParticipant::narrow(
         const eprosima::fastdds::dds::DomainParticipant* domain_participant)
 {
 #ifdef FASTDDS_STATISTICS
-    return reinterpret_cast<const DomainParticipant*>(domain_participant);
+    return static_cast<const DomainParticipant*>(domain_participant);
 #else
     (void)domain_participant;
     return nullptr;

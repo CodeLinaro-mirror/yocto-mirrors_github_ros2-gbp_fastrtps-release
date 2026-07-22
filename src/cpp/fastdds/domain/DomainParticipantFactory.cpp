@@ -31,13 +31,18 @@
 #include <fastdds/utils/QosConverters.hpp>
 
 #include <fastdds/domain/DomainParticipantImpl.hpp>
+#include <fastdds/log/LogResources.hpp>
 #include <rtps/history/TopicPayloadPoolRegistry.hpp>
-#include <rtps/domain/RTPSDomainImpl.hpp>
+#include <rtps/RTPSDomainImpl.hpp>
 #include <statistics/fastdds/domain/DomainParticipantImpl.hpp>
 #include <utils/shared_memory/SharedMemWatchdog.hpp>
 #include <utils/SystemInfo.hpp>
 #include <xmlparser/XMLEndpointParser.h>
 #include <xmlparser/XMLProfileManager.h>
+
+#ifdef FASTDDS_STATISTICS
+#include <fastdds/statistics/dds/domain/DomainParticipant.hpp>
+#endif // ifdef FASTDDS_STATISTICS
 
 using namespace eprosima::fastdds::xmlparser;
 
@@ -54,6 +59,7 @@ DomainParticipantFactory::DomainParticipantFactory()
     , default_participant_qos_(PARTICIPANT_QOS_DEFAULT)
     , topic_pool_(rtps::TopicPayloadPoolRegistry::instance())
     , rtps_domain_(rtps::RTPSDomainImpl::get_instance())
+    , log_resources_(detail::get_log_resources())
 {
 }
 
@@ -157,12 +163,13 @@ DomainParticipant* DomainParticipantFactory::create_participant(
 
     const DomainParticipantQos& pqos = (&qos == &PARTICIPANT_QOS_DEFAULT) ? default_participant_qos_ : qos;
 
-    DomainParticipant* dom_part = new DomainParticipant(mask);
 #ifndef FASTDDS_STATISTICS
+    DomainParticipant* dom_part = new DomainParticipant(mask);
     DomainParticipantImpl* dom_part_impl = new DomainParticipantImpl(dom_part, did, pqos, listener);
 #else
-    statistics::dds::DomainParticipantImpl* dom_part_impl = new statistics::dds::DomainParticipantImpl(dom_part, did,
-                    pqos, listener);
+    statistics::dds::DomainParticipant* dom_part = new statistics::dds::DomainParticipant(mask);
+    statistics::dds::DomainParticipantImpl* dom_part_impl =
+            new statistics::dds::DomainParticipantImpl(dom_part, did, pqos, listener);
 #endif // FASTDDS_STATISTICS
 
     if (fastdds::rtps::GUID_t::unknown() != dom_part_impl->guid())
