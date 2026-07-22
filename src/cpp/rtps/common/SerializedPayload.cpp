@@ -30,6 +30,18 @@ SerializedPayload_t& SerializedPayload_t::operator = (
         return *this;
     }
 
+    if (payload_owner != nullptr)
+    {
+        bool success =  payload_owner->release_payload(*this);
+        static_cast<void>(success);
+        assert(success);
+        payload_owner = nullptr;
+    }
+    else if (data != nullptr)
+    {
+        free(data);
+    }
+
     encapsulation = other.encapsulation;
     length = other.length;
     data = other.data;
@@ -51,7 +63,10 @@ SerializedPayload_t::~SerializedPayload_t()
 {
     if (payload_owner != nullptr)
     {
-        payload_owner->release_payload(*this);
+        bool success = payload_owner->release_payload(*this);
+        static_cast<void>(success);
+        assert(success);
+        payload_owner = nullptr;
     }
     this->empty();
 }
@@ -61,7 +76,7 @@ bool SerializedPayload_t::operator == (
 {
     return ((encapsulation == other.encapsulation) &&
            (length == other.length) &&
-           (0 == memcmp(data, other.data, length)));
+           (length == 0 || 0 == memcmp(data, other.data, length)));
 }
 
 bool SerializedPayload_t::copy(
