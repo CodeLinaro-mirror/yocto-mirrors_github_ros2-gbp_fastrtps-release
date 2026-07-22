@@ -108,7 +108,7 @@ void PDPSimple::initializeParticipantProxyData(
 {
     PDP::initializeParticipantProxyData(participant_data);
 
-    auto discovery_config = getRTPSParticipant()->get_attributes().builtin.discovery_config;
+    const auto& discovery_config = getRTPSParticipant()->get_const_attributes().builtin.discovery_config;
 
     if (discovery_config.use_SIMPLE_EndpointDiscoveryProtocol)
     {
@@ -291,6 +291,22 @@ void PDPSimple::announceParticipantState(
         if (!(dispose || new_change))
         {
             endpoints->writer.writer_->send_periodic_announcement();
+
+#if HAVE_SECURITY
+            if (mp_RTPSParticipant->is_secure())
+            {
+                // PDP non-secure endpoints are unmatched after participant authentication succeeds (and secure PDP
+                // endpoints are matched), and since the secure ones are TRANSIENT_LOCAL, we send periodic heartbeats
+                // to assert liveliness on remote participants
+                auto secure = dynamic_cast<fastdds::rtps::SimplePDPEndpointsSecure*>(builtin_endpoints_.get());
+                assert(secure && secure->secure_writer.writer_);
+                if (!secure || !secure->secure_writer.writer_)
+                {
+                    FASTDDS_UNREACHABLE();   // “cannot happen” invariant
+                }
+                secure->secure_writer.writer_->send_periodic_heartbeat(true, true);
+            }
+#endif // HAVE_SECURITY
         }
     }
 }
@@ -336,8 +352,7 @@ bool PDPSimple::createPDPEndpoints()
 
 bool PDPSimple::create_dcps_participant_endpoints()
 {
-    const RTPSParticipantAttributes& pattr = mp_RTPSParticipant->get_attributes();
-    const RTPSParticipantAllocationAttributes& allocation = pattr.allocation;
+    const RTPSParticipantAllocationAttributes& allocation = mp_RTPSParticipant->get_const_attributes().allocation;
     const BuiltinAttributes& builtin_att = mp_builtin->m_att;
     auto endpoints = dynamic_cast<fastdds::rtps::SimplePDPEndpoints*>(builtin_endpoints_.get());
     assert(nullptr != endpoints);
@@ -466,8 +481,7 @@ bool PDPSimple::create_dcps_participant_endpoints()
 #if HAVE_SECURITY
 bool PDPSimple::create_dcps_participant_secure_endpoints()
 {
-    const RTPSParticipantAttributes& pattr = mp_RTPSParticipant->get_attributes();
-    const RTPSParticipantAllocationAttributes& allocation = pattr.allocation;
+    const RTPSParticipantAllocationAttributes& allocation = mp_RTPSParticipant->get_const_attributes().allocation;
     const BuiltinAttributes& builtin_att = mp_builtin->m_att;
     auto endpoints = dynamic_cast<fastdds::rtps::SimplePDPEndpointsSecure*>(builtin_endpoints_.get());
     assert(nullptr != endpoints);
@@ -637,7 +651,7 @@ void PDPSimple::match_pdp_remote_endpoints(
     auto endpoints = static_cast<fastdds::rtps::SimplePDPEndpoints*>(builtin_endpoints_.get());
 
     const NetworkFactory& network = mp_RTPSParticipant->network_factory();
-    bool use_multicast_locators = !mp_RTPSParticipant->get_attributes().builtin.avoid_builtin_multicast ||
+    bool use_multicast_locators = !mp_RTPSParticipant->get_const_attributes().builtin.avoid_builtin_multicast ||
             pdata.metatraffic_locators.unicast.empty();
     const uint32_t endp = pdata.m_available_builtin_endpoints;
 
@@ -685,8 +699,8 @@ void PDPSimple::match_pdp_remote_endpoints(
                         reader->getGuid(), pdata.guid, *temp_writer_data,
                         reader->getAttributes().security_attributes()))
             {
-                EPROSIMA_LOG_ERROR(RTPS_EDP, "Security manager returns an error for writer " <<
-                        temp_writer_data->guid);
+                EPROSIMA_LOG_ERROR(RTPS_EDP, "Security manager returns an error for writer "
+                        << temp_writer_data->guid);
             }
         }
         else
@@ -715,8 +729,8 @@ void PDPSimple::match_pdp_remote_endpoints(
                         writer->getGuid(), pdata.guid, *temp_reader_data,
                         writer->getAttributes().security_attributes()))
             {
-                EPROSIMA_LOG_ERROR(RTPS_EDP, "Security manager returns an error for reader " <<
-                        temp_reader_data->guid);
+                EPROSIMA_LOG_ERROR(RTPS_EDP, "Security manager returns an error for reader "
+                        << temp_reader_data->guid);
             }
         }
         else
